@@ -92,7 +92,7 @@
   "devDependencies": {
     "@onyx-ai/shared": "file:../shared",
     "tsdown": "^0.23.0",
-    "typescript": "7.1.0-dev.20260916.1"
+    "typescript": "7.1.0-dev.20261023.1"
   },
   "peerDependencies": {
     "@dnd-kit/core": "^6.0.0",
