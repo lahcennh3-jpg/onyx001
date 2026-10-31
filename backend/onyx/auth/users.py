@@ -85,6 +85,7 @@ from onyx.auth.schemas import AuthBackend, UserCreate
 from onyx.auth.session_tokens import (
     SESSION_TOKEN_GRACE_PERIOD_SECONDS,
     SessionRejection,
+    SessionRejectionReason,
     build_session_rejection_error,
     build_session_token_value,
     build_session_tombstone_value,
@@ -1884,6 +1885,18 @@ class TenantAwareRedisStrategy(RedisStrategy[User, uuid.UUID]):
             record_session_rejection(result)
             return None
         if result.sub is None:
+            return None
+
+        # Routing and authentication must agree even when a request mixes a
+        # session cookie with an API key or PAT for another workspace.
+        if MULTI_TENANT and (
+            not result.tenant_id
+            or result.tenant_id == POSTGRES_DEFAULT_SCHEMA
+            or result.tenant_id != get_current_tenant_id()
+        ):
+            record_session_rejection(
+                SessionRejection(SessionRejectionReason.MALFORMED, result)
+            )
             return None
 
         try:

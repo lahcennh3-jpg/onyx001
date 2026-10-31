@@ -99,6 +99,11 @@ grace period past the session, so a dead token still arrives and
 (`web/src/lib/auth/hooks.ts:useSessionWatcher`) turns that 403 into the
 session-ended message.
 
+On cloud, `onyx/auth/users.py:TenantAwareRedisStrategy.read_token` rejects a
+session whose tenant differs from the request context before looking up the
+user. A request can carry a cookie and a PAT for different workspaces. User
+UUIDs can exist in both schemas, so a user lookup alone cannot bind the session.
+
 **SSO.** `SSOProvider` rows hold the OIDC, Google and SAML settings. Login
 routes load the row on each request (`server/oidc_multi.py`,
 `server/saml_multi.py`), so a new provider needs no restart. SAML has one

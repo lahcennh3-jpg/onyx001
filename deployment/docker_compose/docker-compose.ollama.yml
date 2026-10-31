@@ -1,0 +1,53 @@
+# Local Ollama for the multi-tenant development overlay. No host port is published.
+# Add this file after docker-compose.multitenant.yml when starting the stack.
+services:
+  ollama:
+    image: ollama/ollama:0.13.5@sha256:2c9595c555fd70a28363489ac03bd5bf9e7c5bdf2890373c3a830ffd7252ce6d
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_CONTEXT_LENGTH: "${OLLAMA_CONTEXT_LENGTH:-32768}"
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "OLLAMA_HOST=http://127.0.0.1:11434 ollama list >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  ollama_model:
+    image: ollama/ollama:0.13.5@sha256:2c9595c555fd70a28363489ac03bd5bf9e7c5bdf2890373c3a830ffd7252ce6d
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      NO_PROXY: ollama,localhost,127.0.0.1
+      no_proxy: ollama,localhost,127.0.0.1
+    command: ["pull", "${OLLAMA_DEFAULT_MODEL:-qwen3:0.6b}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  api_server:
+    environment:
+      - AUTO_PROVISION_DEFAULT_LLM_PROVIDERS=true
+      - OLLAMA_DEFAULT_API_BASE=http://ollama:11434
+      - OLLAMA_DEFAULT_MODEL=${OLLAMA_DEFAULT_MODEL:-qwen3:0.6b}
+      - NO_PROXY=ollama,localhost,127.0.0.1
+      - no_proxy=ollama,localhost,127.0.0.1
+    depends_on:
+      ollama_model:
+        condition: service_completed_successfully
+
+  background:
+    environment:
+      - AUTO_PROVISION_DEFAULT_LLM_PROVIDERS=true
+      - OLLAMA_DEFAULT_API_BASE=http://ollama:11434
+      - OLLAMA_DEFAULT_MODEL=${OLLAMA_DEFAULT_MODEL:-qwen3:0.6b}
+      - NO_PROXY=ollama,localhost,127.0.0.1
+      - no_proxy=ollama,localhost,127.0.0.1
+    depends_on:
+      ollama_model:
+        condition: service_completed_successfully
+
+volumes:
+  ollama_models:

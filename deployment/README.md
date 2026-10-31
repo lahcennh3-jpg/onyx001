@@ -1,6 +1,9 @@
 Documentation for how to deploy Onyx can be found in our official docs:
 https://docs.onyx.app/deployment/overview
 
+For the multi-tenant assistant development workflow and isolation checks, see
+[Multi-tenant AI assistant](MULTITENANT_ASSISTANT.md).
+
 ## Maintaining the compose files (contributors)
 
 `docker_compose/docker-compose.yml`, `docker-compose.prod.yml` and

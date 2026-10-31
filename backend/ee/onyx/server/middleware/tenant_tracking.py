@@ -1,10 +1,10 @@
 import asyncio
 import logging
-import sys
 from contextvars import Token
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from fastapi.responses import JSONResponse
+from jwt import InvalidTokenError
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from ee.onyx.auth.users import decode_anonymous_user_jwt_token
@@ -154,12 +154,12 @@ async def _get_tenant_id_from_request(
     """
     mcp_tenant = await oauth_provider_tenant_from_request(request)
     if mcp_tenant is not None:
-        return mcp_tenant
+        return _validated_tenant_id(mcp_tenant)
 
     # Check for API key or PAT in Authorization header
     tenant_id = extract_tenant_from_auth_header(request)
     if tenant_id is not None:
-        return tenant_id
+        return _validated_tenant_id(tenant_id)
 
     try:
         # Look up the session token data in Redis. Web clients send it as the
@@ -169,57 +169,32 @@ async def _get_tenant_id_from_request(
         if token_data is None:
             token_data = await retrieve_auth_token_data_from_bearer(request)
 
-        if token_data:
-            tenant_id_from_payload = token_data.get(
-                "tenant_id", POSTGRES_DEFAULT_SCHEMA
-            )
+    except Exception as exc:
+        logger.exception("Could not resolve the session tenant")
+        raise OnyxError(OnyxErrorCode.INTERNAL_ERROR) from exc
 
-            tenant_id = (
-                str(tenant_id_from_payload)
-                if tenant_id_from_payload is not None
-                else None
-            )
+    # A signed-in session must not be redirected by a leftover anonymous cookie.
+    if token_data is not None:
+        return _validated_tenant_id(token_data.get("tenant_id"))
 
-            if tenant_id and not is_valid_schema_name(tenant_id):
-                raise HTTPException(status_code=400, detail="Invalid tenant ID format")
+    anonymous_user_cookie = request.cookies.get(ANONYMOUS_USER_COOKIE_NAME)
+    if anonymous_user_cookie:
+        try:
+            anonymous_user_data = decode_anonymous_user_jwt_token(anonymous_user_cookie)
+        except InvalidTokenError:
+            logger.warning("Invalid anonymous user cookie")
+        else:
+            return _validated_tenant_id(anonymous_user_data.get("tenant_id"))
 
-        # Check for anonymous user cookie
-        anonymous_user_cookie = request.cookies.get(ANONYMOUS_USER_COOKIE_NAME)
-        if anonymous_user_cookie:
-            try:
-                anonymous_user_data = decode_anonymous_user_jwt_token(
-                    anonymous_user_cookie
-                )
-                tenant_id = anonymous_user_data.get(
-                    "tenant_id", POSTGRES_DEFAULT_SCHEMA
-                )
+    return POSTGRES_DEFAULT_SCHEMA
 
-                if not tenant_id or not is_valid_schema_name(tenant_id):
-                    raise HTTPException(
-                        status_code=400, detail="Invalid tenant ID format"
-                    )
 
-                return tenant_id
-
-            except Exception as e:
-                logger.error("Error decoding anonymous user cookie: %s", str(e))
-                # Continue and attempt to authenticate
-
-        logger.debug(
-            "Token data not found or expired in Redis, defaulting to POSTGRES_DEFAULT_SCHEMA"
-        )
-
-        # Return POSTGRES_DEFAULT_SCHEMA, so non-authenticated requests are sent to the default schema
-        # The CURRENT_TENANT_ID_CONTEXTVAR is initialized with POSTGRES_DEFAULT_SCHEMA,
-        # so we maintain consistency by returning it here when no valid tenant is found.
-        return POSTGRES_DEFAULT_SCHEMA
-
-    except Exception as e:
-        logger.error("Unexpected error in _get_tenant_id_from_request: %s", str(e))
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-    finally:
-        # Don't `return` while an exception is propagating — it would swallow it
-        # and fall back to the wrong tenant. Fall back only on the normal path.
-        if sys.exc_info()[0] is None:
-            return tenant_id or POSTGRES_DEFAULT_SCHEMA  # noqa: B012
+def _validated_tenant_id(tenant_id: object) -> str:
+    if (
+        not isinstance(tenant_id, str)
+        or not tenant_id
+        or tenant_id == POSTGRES_DEFAULT_SCHEMA
+        or not is_valid_schema_name(tenant_id)
+    ):
+        raise OnyxError(OnyxErrorCode.INVALID_TOKEN, "Invalid workspace in token")
+    return tenant_id

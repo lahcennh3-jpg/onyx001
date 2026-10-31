@@ -32,6 +32,8 @@ from onyx.configs.app_configs import (
     COHERE_DEFAULT_API_KEY,
     CONTROL_PLANE_API_BASE_URL,
     DEV_MODE,
+    OLLAMA_DEFAULT_API_BASE,
+    OLLAMA_DEFAULT_MODEL,
     OPENAI_DEFAULT_API_KEY,
     OPENROUTER_DEFAULT_API_KEY,
     VERTEXAI_DEFAULT_CREDENTIALS,
@@ -62,6 +64,7 @@ from onyx.db.tenant_shard import clear_tenant_placement, record_tenant_placement
 from onyx.llm.well_known_providers.auto_update_models import LLMRecommendations
 from onyx.llm.well_known_providers.constants import (
     ANTHROPIC_PROVIDER_NAME,
+    OLLAMA_PROVIDER_NAME,
     OPENAI_PROVIDER_NAME,
     OPENROUTER_PROVIDER_NAME,
     VERTEX_CREDENTIALS_FILE_KWARG,
@@ -408,6 +411,27 @@ def configure_default_api_keys(db_session: Session) -> None:
                 has_set_default_provider = True
         except Exception as e:
             logger.error("Failed to configure %s provider: %s", request.provider, e)
+
+    # An explicitly configured local model is the default for new workspaces.
+    if (
+        AUTO_PROVISION_DEFAULT_LLM_PROVIDERS
+        and OLLAMA_DEFAULT_API_BASE
+        and OLLAMA_DEFAULT_MODEL
+    ):
+        _upsert(
+            LLMProviderUpsertRequest(
+                name="Ollama",
+                provider=OLLAMA_PROVIDER_NAME,
+                api_base=OLLAMA_DEFAULT_API_BASE,
+                model_configurations=[
+                    ModelConfigurationUpsertRequest(
+                        name=OLLAMA_DEFAULT_MODEL, is_visible=True
+                    )
+                ],
+                is_auto_mode=False,
+            ),
+            OLLAMA_DEFAULT_MODEL,
+        )
 
     # Configure OpenAI provider
     if OPENAI_DEFAULT_API_KEY and AUTO_PROVISION_DEFAULT_LLM_PROVIDERS:

@@ -66,7 +66,7 @@ ee/onyx/server/middleware/tenant_tracking.py:tenant_id_middleware   (EE app, MUL
     OAuth-provider token -> tenant in the token
     API key, PAT or SCIM token -> tenant in the token prefix
     Redis session (cookie or mobile bearer) -> tenant in the session value
-    anonymous-user cookie -> tenant in its signed JWT (overrides a session)
+    anonymous-user cookie -> tenant in its signed JWT, only without a session
     nothing -> POSTGRES_DEFAULT_SCHEMA, which holds no tenant data
   CURRENT_TENANT_ID_CONTEXTVAR.set(tenant); reset in finally
   gated-tenant check (Redis set) outside the allowed prefixes
@@ -79,10 +79,14 @@ handler -> db/engine/sql_engine.py:get_session
 ```
 
 Every source is signed or server-issued, so a caller cannot forge a tenant
-ID. A valid anonymous-user cookie takes precedence over the session token, so
-a browser that holds both goes to the cookie's tenant. A tenant read from a token only selects the schema.
+ID. Authenticated sessions take precedence over anonymous-user cookies. Every
+credential must name a non-default, valid schema. Missing or invalid tenant
+claims fail closed rather than falling back to anonymous access.
+A tenant read from a token only selects the schema.
 The credential lookup then runs in that schema, so a forged prefix fails
-authentication. Paths in `TENANT_RESOLUTION_SKIP_PATHS`, such as health checks
+authentication. Redis session authentication also checks that the session's
+tenant matches the request before it reads a user ([[auth-and-identity]]).
+Paths in `TENANT_RESOLUTION_SKIP_PATHS`, such as health checks
 and the OAuth-provider protocol routes, get the default schema.
 The tenant middleware is pure ASGI, so the tenant holds until a streamed body
 and its background task end ([[streaming-protocol#pure-asgi-middleware]]).
@@ -110,6 +114,10 @@ stored SQL dump of the shard's template schema at the code's Alembic head
 (`ee/onyx/db/tenant_snapshot.py:apply_snapshot`). It runs the migration chain
 instead when no snapshot exists at that head, or when the schema already has
 tables from a failed build.
+
+`configure_default_api_keys` can provision a local Ollama chat default from the
+operator's `OLLAMA_DEFAULT_API_BASE` and `OLLAMA_DEFAULT_MODEL`. It respects
+`AUTO_PROVISION_DEFAULT_LLM_PROVIDERS`; these defaults do not alter existing tenants.
 
 **Two Alembic trees.** `backend/alembic/` migrates the tenant tables
 (`db/models.py:Base`) once per tenant schema. `backend/alembic_tenants/`
@@ -224,10 +232,6 @@ migrates only the catalog tables (`PublicBase`) in `public`.
 
 ## Known issues
 
-- **A valid anonymous-user cookie overrides a session** in
-  `_get_tenant_id_from_request`. A signed-in user who still holds an anonymous
-  cookie for another workspace resolves to that workspace's schema. It is not
-  confirmed whether this is intended.
 - **The model server trusts a plain tenant header.**
   `utils/middleware.py:tenant_header_middleware` sets the tenant from
   `X-Onyx-Tenant-ID` with no check. Only `backend/model_server/main.py` uses

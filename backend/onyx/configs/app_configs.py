@@ -2204,6 +2204,9 @@ COHERE_DEFAULT_API_KEY = os.environ.get("COHERE_DEFAULT_API_KEY")
 VERTEXAI_DEFAULT_CREDENTIALS = os.environ.get("VERTEXAI_DEFAULT_CREDENTIALS")
 VERTEXAI_DEFAULT_LOCATION = os.environ.get("VERTEXAI_DEFAULT_LOCATION", "global")
 OPENROUTER_DEFAULT_API_KEY = os.environ.get("OPENROUTER_DEFAULT_API_KEY")
+# Opt-in local model for newly provisioned workspaces; no provider key required.
+OLLAMA_DEFAULT_API_BASE = os.environ.get("OLLAMA_DEFAULT_API_BASE")
+OLLAMA_DEFAULT_MODEL = os.environ.get("OLLAMA_DEFAULT_MODEL")
 # Whether tenant provisioning auto-creates LLMProvider rows seeded with the
 # *_DEFAULT_API_KEY env vars above. Defaults to True so self-hosted
 # deployments keep the existing behavior. Cloud sets this to False to

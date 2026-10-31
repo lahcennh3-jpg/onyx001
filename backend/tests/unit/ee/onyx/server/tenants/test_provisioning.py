@@ -2,6 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from onyx.server.manage.llm.models import LLMProviderUpsertRequest
+
 _PROVISIONING_MODULE = "ee.onyx.server.tenants.provisioning"
 
 
@@ -36,6 +40,8 @@ def _run_configure(
         patch(f"{_PROVISIONING_MODULE}.ANTHROPIC_DEFAULT_API_KEY", "anthropic-key"),
         patch(f"{_PROVISIONING_MODULE}.OPENROUTER_DEFAULT_API_KEY", "openrouter-key"),
         patch(f"{_PROVISIONING_MODULE}.COHERE_DEFAULT_API_KEY", None),
+        patch(f"{_PROVISIONING_MODULE}.OLLAMA_DEFAULT_API_BASE", None),
+        patch(f"{_PROVISIONING_MODULE}.OLLAMA_DEFAULT_MODEL", None),
         patch(f"{_PROVISIONING_MODULE}.VERTEXAI_DEFAULT_CREDENTIALS", None),
         patch(
             f"{_PROVISIONING_MODULE}.get_recommendations",
@@ -80,3 +86,57 @@ def test_auto_provision_disabled_skips_default_providers() -> None:
     # config seeded with the cloud OpenAI key.
     assert upsert_mock.call_count == 0
     assert image_gen_mock.call_count == 0
+
+
+@pytest.mark.parametrize(
+    ("enabled", "api_base", "model", "expected"),
+    [
+        (True, "http://ollama:11434", "qwen3:0.6b", True),
+        (False, "http://ollama:11434", "qwen3:0.6b", False),
+        (True, None, "qwen3:0.6b", False),
+        (True, "http://ollama:11434", None, False),
+    ],
+)
+def test_local_model_provisioning_is_explicit_and_respects_opt_out(
+    enabled: bool, api_base: str | None, model: str | None, expected: bool
+) -> None:
+    with (
+        patch(f"{_PROVISIONING_MODULE}.AUTO_PROVISION_DEFAULT_LLM_PROVIDERS", enabled),
+        patch(f"{_PROVISIONING_MODULE}.OLLAMA_DEFAULT_API_BASE", api_base),
+        patch(f"{_PROVISIONING_MODULE}.OLLAMA_DEFAULT_MODEL", model),
+        patch(f"{_PROVISIONING_MODULE}.OPENAI_DEFAULT_API_KEY", None),
+        patch(f"{_PROVISIONING_MODULE}.ANTHROPIC_DEFAULT_API_KEY", None),
+        patch(f"{_PROVISIONING_MODULE}.OPENROUTER_DEFAULT_API_KEY", None),
+        patch(f"{_PROVISIONING_MODULE}.COHERE_DEFAULT_API_KEY", None),
+        patch(f"{_PROVISIONING_MODULE}.VERTEXAI_DEFAULT_CREDENTIALS", None),
+        patch(
+            f"{_PROVISIONING_MODULE}.get_recommendations",
+            return_value=_patch_recommendations(),
+        ),
+        patch(
+            f"{_PROVISIONING_MODULE}.fetch_existing_llm_provider_by_name_and_type",
+            return_value=None,
+        ),
+        patch(f"{_PROVISIONING_MODULE}.upsert_llm_provider") as upsert,
+        patch(f"{_PROVISIONING_MODULE}.update_default_model") as default,
+    ):
+        from ee.onyx.server.tenants.provisioning import configure_default_api_keys
+
+        session = MagicMock()
+        configure_default_api_keys(session)
+
+    if not expected:
+        upsert.assert_not_called()
+        default.assert_not_called()
+        return
+
+    request = upsert.call_args.args[0]
+    assert isinstance(request, LLMProviderUpsertRequest)
+    assert request.provider == "ollama_chat"
+    assert request.api_base == api_base
+    assert request.api_key is None
+    assert [configuration.name for configuration in request.model_configurations] == [
+        model
+    ]
+    upsert.assert_called_once_with(request, session)
+    assert default.call_args.kwargs["model"] == model
